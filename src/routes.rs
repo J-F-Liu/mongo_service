@@ -181,7 +181,20 @@ pub async fn patch_record(mut req: Request<State>) -> tide::Result<impl Into<Res
 
 pub async fn delete_record(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
-    let filter = doc! {"_id": ObjectId::with_string(id)?};
+    let query: Query = req.query()?;
+    let filter = if let Some(string) = query.r#where {
+        let value: serde_json::Value = serde_json::from_str(&string)?;
+        match Bson::try_from(value)? {
+            Bson::Document(mut document) => {
+                document.insert("_id", ObjectId::with_string(id)?);
+                Some(document)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let filter = filter.unwrap_or(doc! {"_id": ObjectId::with_string(id)?});
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
     match collection.delete_one(filter, None).await {
