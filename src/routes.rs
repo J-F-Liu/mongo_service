@@ -158,6 +158,27 @@ pub async fn update_record(mut req: Request<State>) -> tide::Result<impl Into<Re
     }
 }
 
+pub async fn patch_record(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
+    let id = req.param("id")?;
+    let filter = doc! {"_id": ObjectId::with_string(id)?};
+    let value: serde_json::Value = req
+        .body_json()
+        .await
+        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
+    match Bson::try_from(value)? {
+        Bson::Document(mut document) => {
+            let collection_name = req.param("collection")?;
+            let collection = req.state().db.collection(collection_name);
+            document.insert("$currentDate", doc! { "updatedAt": true });
+            match collection.update_one(filter, document, None).await {
+                Ok(result) => Ok(json!(result)),
+                Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
+            }
+        }
+        _ => Err(Error::from_str(StatusCode::BadRequest, "Expect document")),
+    }
+}
+
 pub async fn delete_record(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};

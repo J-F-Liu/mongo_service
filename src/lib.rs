@@ -18,6 +18,7 @@ pub async fn serve(mongo_uri: &str, database: &str) -> Result<tide::Server<State
     app.at("/:collection/:id")
         .get(find_record)
         .put(update_record)
+        .patch(patch_record)
         .delete(delete_record);
     Ok(app)
 }
