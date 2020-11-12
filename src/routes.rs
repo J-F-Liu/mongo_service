@@ -112,11 +112,19 @@ pub async fn find_objects(req: Request<State>) -> tide::Result<impl Into<Respons
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
     let count = if query.count == Some(1) {
-        Some(collection.count_documents(filter.clone(), None).await.unwrap())
+        Some(
+            collection
+                .count_documents(filter.clone(), None)
+                .await
+                .map_err(|err| Error::new(StatusCode::InternalServerError, err))?,
+        )
     } else {
         None
     };
-    let mut cursor = collection.find(filter, find_options).await.unwrap();
+    let mut cursor = collection
+        .find(filter, find_options)
+        .await
+        .map_err(|err| Error::new(StatusCode::InternalServerError, err))?;
     let mut results = Vec::new();
     while let Some(result) = cursor.next().await {
         match result {
