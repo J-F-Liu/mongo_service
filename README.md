@@ -1,4 +1,6 @@
 # mongo_service
+[![Crates.io](https://img.shields.io/crates/v/mongo_service.svg)](https://crates.io/crates/mongo_service)
+[![Docs](https://docs.rs/mongo_service/badge.svg)](https://docs.rs/mongo_service)
 
 General CRUD RESTful APIs for MongoDB.
 
