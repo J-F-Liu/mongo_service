@@ -18,7 +18,75 @@ pub struct Query {
     count: Option<i8>,
 }
 
-pub async fn find_record(req: Request<State>) -> tide::Result<impl Into<Response>> {
+impl Query {
+    pub fn create_filter(&self) -> tide::Result<Option<Document>> {
+        if let Some(filter) = &self.r#where {
+            let value: serde_json::Value = serde_json::from_str(filter)
+                .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json in where"))?;
+            if let Ok(Bson::Document(document)) = Bson::try_from(value) {
+                Ok(Some(document))
+            } else {
+                Err(Error::from_str(StatusCode::BadRequest, "Expect json object in where"))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn create_sort(&self) -> Option<Document> {
+        self.order.as_ref().map(|order| {
+            let mut sort = Document::new();
+            for field in order.split(',') {
+                if let Some(field) = field.strip_prefix('-') {
+                    sort.insert(field, -1);
+                } else {
+                    sort.insert(field, 1);
+                }
+            }
+            sort
+        })
+    }
+
+    pub fn create_projection(&self) -> Option<Document> {
+        self.keys.as_ref().map(|keys| {
+            let mut fields = Document::new();
+            for field in keys.split(',') {
+                if let Some(field) = field.strip_prefix('-') {
+                    fields.insert(field, 0);
+                } else {
+                    fields.insert(field, 1);
+                }
+            }
+            fields
+        })
+    }
+
+    pub fn create_find_options(&self) -> FindOptions {
+        FindOptions::builder()
+            .skip(self.skip.unwrap_or(0))
+            .limit(self.limit.unwrap_or(200))
+            .sort(self.create_sort())
+            .projection(self.create_projection())
+            .build()
+    }
+}
+
+async fn parse_request_body(req: &mut Request<State>) -> tide::Result<Document> {
+    let value: serde_json::Value = req
+        .body_json()
+        .await
+        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
+    if let Ok(Bson::Document(document)) = Bson::try_from(value) {
+        Ok(document)
+    } else {
+        Err(Error::from_str(
+            StatusCode::BadRequest,
+            "Expect json object in request body",
+        ))
+    }
+}
+
+pub async fn find_object(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
     let collection_name = req.param("collection")?;
@@ -29,65 +97,22 @@ pub async fn find_record(req: Request<State>) -> tide::Result<impl Into<Response
                 util::make_json_friendly(&mut doc)?;
                 Ok(Body::from_json(&doc)?)
             } else {
-                Err(Error::from_str(
-                    StatusCode::NotFound,
-                    format!("{} not found", id),
-                ))
+                Err(Error::from_str(StatusCode::NotFound, format!("{} not found", id)))
             }
         }
         Err(err) => Err(Error::new(StatusCode::ServiceUnavailable, err)),
     }
 }
 
-pub async fn find_records(req: Request<State>) -> tide::Result<impl Into<Response>> {
+pub async fn find_objects(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let query: Query = req.query()?;
-    let filter = if let Some(string) = query.r#where {
-        let value: serde_json::Value = serde_json::from_str(&string)?;
-        match Bson::try_from(value)? {
-            Bson::Document(document) => Some(document),
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let order = query.order.map(|string| {
-        let mut sort = Document::new();
-        for field in string.split(',') {
-            if let Some(field) = field.strip_prefix('-') {
-                sort.insert(field, -1);
-            } else {
-                sort.insert(field, 1);
-            }
-        }
-        sort
-    });
-    let projection = query.keys.map(|string| {
-        let mut fields = Document::new();
-        for field in string.split(',') {
-            if let Some(field) = field.strip_prefix('-') {
-                fields.insert(field, -1);
-            } else {
-                fields.insert(field, 1);
-            }
-        }
-        fields
-    });
-    let find_options = FindOptions::builder()
-        .skip(query.skip.unwrap_or(0))
-        .limit(query.limit.unwrap_or(200))
-        .sort(order)
-        .projection(projection)
-        .build();
+    let filter = query.create_filter()?;
+    let find_options = query.create_find_options();
 
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
     let count = if query.count == Some(1) {
-        Some(
-            collection
-                .count_documents(filter.clone(), None)
-                .await
-                .unwrap(),
-        )
+        Some(collection.count_documents(filter.clone(), None).await.unwrap())
     } else {
         None
     };
@@ -109,92 +134,63 @@ pub async fn find_records(req: Request<State>) -> tide::Result<impl Into<Respons
     }
 }
 
-pub async fn insert_record(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
-    let value: serde_json::Value = req
-        .body_json()
-        .await
-        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
-    match Bson::try_from(value)? {
-        Bson::Document(mut document) => {
-            let now = Utc::now();
-            document.insert("createdAt", now);
-            let collection_name = req.param("collection")?;
-            let collection = req.state().db.collection(collection_name);
-            match collection.insert_one(document, None).await {
-                Ok(result) => {
-                    let response = Response::builder(StatusCode::Created).body(json!({
-                        "objectId": result.inserted_id.as_object_id().unwrap().to_hex(),
-                        "createdAt": util::format_datetime(&now)
-                    }));
-                    Ok(response)
-                }
-                Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-            }
+pub async fn insert_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
+    let mut document = parse_request_body(&mut req).await?;
+    let now = Utc::now();
+    document.insert("createdAt", now);
+
+    let collection_name = req.param("collection")?;
+    let collection = req.state().db.collection(collection_name);
+    match collection.insert_one(document, None).await {
+        Ok(result) => {
+            let response = Response::builder(StatusCode::Created).body(json!({
+                "objectId": result.inserted_id.as_object_id().unwrap().to_hex(),
+                "createdAt": util::format_datetime(&now)
+            }));
+            Ok(response)
         }
-        _ => Err(Error::from_str(StatusCode::BadRequest, "Expect document")),
+        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
     }
 }
 
-pub async fn update_record(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
+pub async fn update_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
-    let value: serde_json::Value = req
-        .body_json()
-        .await
-        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
-    match Bson::try_from(value)? {
-        Bson::Document(document) => {
-            let collection_name = req.param("collection")?;
-            let collection = req.state().db.collection(collection_name);
-            let mut update = Document::new();
-            update.insert("$set", document);
-            update.insert("$currentDate", doc! { "updatedAt": true });
-            match collection.update_one(filter, update, None).await {
-                Ok(result) => Ok(json!(result)),
-                Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-            }
-        }
-        _ => Err(Error::from_str(StatusCode::BadRequest, "Expect document")),
+    let document = parse_request_body(&mut req).await?;
+    let mut update = Document::new();
+    update.insert("$set", document);
+    update.insert("$currentDate", doc! { "updatedAt": true });
+
+    let collection_name = req.param("collection")?;
+    let collection = req.state().db.collection(collection_name);
+    match collection.update_one(filter, update, None).await {
+        Ok(result) => Ok(json!(result)),
+        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
     }
 }
 
-pub async fn patch_record(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
+pub async fn modify_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
-    let value: serde_json::Value = req
-        .body_json()
-        .await
-        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
-    match Bson::try_from(value)? {
-        Bson::Document(mut document) => {
-            let collection_name = req.param("collection")?;
-            let collection = req.state().db.collection(collection_name);
-            document.insert("$currentDate", doc! { "updatedAt": true });
-            match collection.update_one(filter, document, None).await {
-                Ok(result) => Ok(json!(result)),
-                Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-            }
-        }
-        _ => Err(Error::from_str(StatusCode::BadRequest, "Expect document")),
+    let mut document = parse_request_body(&mut req).await?;
+    document.insert("$currentDate", doc! { "updatedAt": true });
+
+    let collection_name = req.param("collection")?;
+    let collection = req.state().db.collection(collection_name);
+    match collection.update_one(filter, document, None).await {
+        Ok(result) => Ok(json!(result)),
+        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
     }
 }
 
-pub async fn delete_record(req: Request<State>) -> tide::Result<impl Into<Response>> {
+pub async fn delete_object(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
+    let mut filter = doc! {"_id": ObjectId::with_string(id)?};
     let query: Query = req.query()?;
-    let filter = if let Some(string) = query.r#where {
-        let value: serde_json::Value = serde_json::from_str(&string)?;
-        match Bson::try_from(value)? {
-            Bson::Document(mut document) => {
-                document.insert("_id", ObjectId::with_string(id)?);
-                Some(document)
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-    let filter = filter.unwrap_or(doc! {"_id": ObjectId::with_string(id)?});
+    if let Some(additional) = query.create_filter()? {
+        filter.extend(additional);
+    }
+
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
     match collection.delete_one(filter, None).await {

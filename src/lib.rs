@@ -14,11 +14,11 @@ pub async fn serve(mongo_uri: &str, database: &str) -> Result<tide::Server<State
     let db = client.database(database);
 
     let mut app = tide::with_state(State { db });
-    app.at("/:collection").get(find_records).post(insert_record);
+    app.at("/:collection").get(find_objects).post(insert_object);
     app.at("/:collection/:id")
-        .get(find_record)
-        .put(update_record)
-        .patch(patch_record)
-        .delete(delete_record);
+        .get(find_object)
+        .put(update_object)
+        .patch(modify_object)
+        .delete(delete_object);
     Ok(app)
 }
