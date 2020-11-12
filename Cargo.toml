@@ -1,14 +1,14 @@
 [package]
 authors = ["Junfeng Liu <china.liujunfeng@gmail.com>"]
-categories = ["HTTP server", "Database interfaces"]
+categories = ["web-programming::http-server", "database"]
 description = "General CRUD RESTful APIs for MongoDB."
 edition = "2018"
-keywords = ["MongoDB", "RESTful API"]
+keywords = ["MongoDB", "CRUD"]
 license = "MIT"
 name = "mongo_service"
 readme = "README.md"
 repository = "https://github.com/J-F-Liu/mongo_service.git"
-version = "0.1.0"
+version = "0.1.1"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
