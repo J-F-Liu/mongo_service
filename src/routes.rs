@@ -71,21 +71,6 @@ impl Query {
     }
 }
 
-async fn parse_request_body(req: &mut Request<State>) -> tide::Result<Document> {
-    let value: serde_json::Value = req
-        .body_json()
-        .await
-        .map_err(|_| Error::from_str(StatusCode::BadRequest, "Invalid json"))?;
-    if let Ok(Bson::Document(document)) = Bson::try_from(value) {
-        Ok(document)
-    } else {
-        Err(Error::from_str(
-            StatusCode::BadRequest,
-            "Expect json object in request body",
-        ))
-    }
-}
-
 pub async fn find_object(req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
@@ -143,7 +128,7 @@ pub async fn find_objects(req: Request<State>) -> tide::Result<impl Into<Respons
 }
 
 pub async fn insert_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
-    let mut document = parse_request_body(&mut req).await?;
+    let mut document = util::parse_request_body(&mut req).await?;
     let now = Utc::now();
     document.insert("createdAt", now);
 
@@ -164,7 +149,7 @@ pub async fn insert_object(mut req: Request<State>) -> tide::Result<impl Into<Re
 pub async fn update_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
-    let document = parse_request_body(&mut req).await?;
+    let document = util::parse_request_body(&mut req).await?;
     let mut update = Document::new();
     update.insert("$set", document);
     update.insert("$currentDate", doc! { "updatedAt": true });
@@ -180,7 +165,7 @@ pub async fn update_object(mut req: Request<State>) -> tide::Result<impl Into<Re
 pub async fn modify_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
     let id = req.param("id")?;
     let filter = doc! {"_id": ObjectId::with_string(id)?};
-    let mut document = parse_request_body(&mut req).await?;
+    let mut document = util::parse_request_body(&mut req).await?;
     document.insert("$currentDate", doc! { "updatedAt": true });
 
     let collection_name = req.param("collection")?;
