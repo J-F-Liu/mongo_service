@@ -18,9 +18,10 @@ General CRUD RESTful APIs for MongoDB.
 ### Usage
 
 ```rust
-let data_store = mongo_service::serve(
-    "mongodb://localhost:27017", "database").await?;
+use mongodb::Client;
+
+let client = Client::with_uri_str("mongodb://localhost:27017").await?;
 let mut app = tide::new();
-app.at("/api").nest(data_store);
+app.at("/api").nest(mongo_service::serve(client.database("database")));
 app.listen("127.0.0.1:8080").await?;
 ```
