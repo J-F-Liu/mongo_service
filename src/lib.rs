@@ -1,7 +1,7 @@
 use mongodb::Database;
 
-mod routes;
-mod util;
+pub mod routes;
+pub mod util;
 use routes::*;
 
 #[derive(Clone)]

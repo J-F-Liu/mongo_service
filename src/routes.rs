@@ -10,12 +10,12 @@ use tide::{prelude::*, Body, Error, Request, Response, StatusCode};
 
 #[derive(Debug, Deserialize)]
 pub struct Query {
-    r#where: Option<String>,
-    order: Option<String>,
-    keys: Option<String>,
-    skip: Option<i64>,
-    limit: Option<i64>,
-    count: Option<i8>,
+    pub r#where: Option<String>,
+    pub order: Option<String>,
+    pub keys: Option<String>,
+    pub skip: Option<i64>,
+    pub limit: Option<i64>,
+    pub count: Option<i8>,
 }
 
 impl Query {
@@ -69,6 +69,11 @@ impl Query {
             .projection(self.create_projection())
             .build()
     }
+}
+
+pub async fn list_collections(req: Request<State>) -> tide::Result<impl Into<Response>> {
+    let collections = req.state().db.list_collection_names(None).await?;
+    Ok(json!(collections))
 }
 
 pub async fn find_object(req: Request<State>) -> tide::Result<impl Into<Response>> {
