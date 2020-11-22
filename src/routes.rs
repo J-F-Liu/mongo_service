@@ -76,16 +76,12 @@ pub async fn find_object(req: Request<State>) -> tide::Result<impl Into<Response
     let filter = doc! {"_id": ObjectId::with_string(id)?};
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
-    match collection.find_one(filter, None).await {
-        Ok(result) => {
-            if let Some(mut doc) = result {
-                util::make_json_friendly(&mut doc)?;
-                Ok(Body::from_json(&doc)?)
-            } else {
-                Err(Error::from_str(StatusCode::NotFound, format!("{} not found", id)))
-            }
-        }
-        Err(err) => Err(Error::new(StatusCode::ServiceUnavailable, err)),
+    let result = collection.find_one(filter, None).await?;
+    if let Some(mut doc) = result {
+        util::make_json_friendly(&mut doc)?;
+        Ok(Body::from_json(&doc)?)
+    } else {
+        Err(Error::from_str(StatusCode::NotFound, "Object not found"))
     }
 }
 
@@ -97,19 +93,11 @@ pub async fn find_objects(req: Request<State>) -> tide::Result<impl Into<Respons
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
     let count = if query.count == Some(1) {
-        Some(
-            collection
-                .count_documents(filter.clone(), None)
-                .await
-                .map_err(|err| Error::new(StatusCode::InternalServerError, err))?,
-        )
+        Some(collection.count_documents(filter.clone(), None).await?)
     } else {
         None
     };
-    let mut cursor = collection
-        .find(filter, find_options)
-        .await
-        .map_err(|err| Error::new(StatusCode::InternalServerError, err))?;
+    let mut cursor = collection.find(filter, find_options).await?;
     let mut results = Vec::new();
     while let Some(result) = cursor.next().await {
         match result {
@@ -128,22 +116,18 @@ pub async fn find_objects(req: Request<State>) -> tide::Result<impl Into<Respons
 }
 
 pub async fn insert_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
-    let mut document = util::parse_request_body(&mut req).await?;
+    let mut object = util::parse_request_body(&mut req).await?;
     let now = Utc::now();
-    document.insert("createdAt", now);
+    object.insert("createdAt", now);
 
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
-    match collection.insert_one(document, None).await {
-        Ok(result) => {
-            let response = Response::builder(StatusCode::Created).body(json!({
-                "objectId": result.inserted_id.as_object_id().unwrap().to_hex(),
-                "createdAt": util::format_datetime(&now)
-            }));
-            Ok(response)
-        }
-        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-    }
+    let result = collection.insert_one(object, None).await?;
+    let response = Response::builder(StatusCode::Created).body(json!({
+        "objectId": result.inserted_id.as_object_id().unwrap().to_hex(),
+        "createdAt": util::format_datetime(&now)
+    }));
+    Ok(response)
 }
 
 pub async fn update_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
@@ -156,10 +140,8 @@ pub async fn update_object(mut req: Request<State>) -> tide::Result<impl Into<Re
 
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
-    match collection.update_one(filter, update, None).await {
-        Ok(result) => Ok(json!(result)),
-        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-    }
+    let result = collection.update_one(filter, update, None).await?;
+    Ok(json!(result))
 }
 
 pub async fn modify_object(mut req: Request<State>) -> tide::Result<impl Into<Response>> {
@@ -170,10 +152,8 @@ pub async fn modify_object(mut req: Request<State>) -> tide::Result<impl Into<Re
 
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
-    match collection.update_one(filter, document, None).await {
-        Ok(result) => Ok(json!(result)),
-        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-    }
+    let result = collection.update_one(filter, document, None).await?;
+    Ok(json!(result))
 }
 
 pub async fn delete_object(req: Request<State>) -> tide::Result<impl Into<Response>> {
@@ -186,8 +166,6 @@ pub async fn delete_object(req: Request<State>) -> tide::Result<impl Into<Respon
 
     let collection_name = req.param("collection")?;
     let collection = req.state().db.collection(collection_name);
-    match collection.delete_one(filter, None).await {
-        Ok(result) => Ok(json!(result)),
-        Err(err) => Err(Error::new(StatusCode::InternalServerError, err)),
-    }
+    let result = collection.delete_one(filter, None).await?;
+    Ok(json!(result))
 }
